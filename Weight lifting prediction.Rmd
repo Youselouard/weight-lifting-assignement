@@ -1,0 +1,106 @@
+---
+title: "Weight lifting machine learning project"
+author: "Youssef"
+date: "6/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+```
+
+## Summary
+
+This paper aims at building a machine learning algorithm to predict if weight lifting is done correctly or incorrectly (and identifying the type of mistake done) using accelerometer data placed on several body parts of a few participants. The data comes from this source http://groupware.les.inf.puc-rio.br/har.
+
+## Preparing the data
+
+We will first make some transformation to the data. 
+
+We will remove some variables we don't want to use as predictors. We remove the first variable that is simply the row number as well as time related variables (timestamps and windows). We do so in order to focus our analysis on the accelerometer data without involving time.
+
+We will also remove all calculated variables in the dataset over the time windows (variance, standard deviation etc.)
+
+```{r}
+pml_training <- read.csv("pml-training.csv")
+pml_testing <- read.csv("pml-testing.csv")
+train <- pml_training[,c(-1,-3,-4,-5,-6,-7)] #removing time variables and row numbers
+test <- pml_testing[,c(-1,-3,-4,-5,-6,-7)] #removing time variables and row numbers
+
+train$user_name <- as.factor(train$user_name)
+test$user_name <- as.factor(test$user_name)
+train$classe <- as.factor(train$classe)
+  
+#Removing calculated variables (kurtosis, skewnessm max, min, var, avg, stddev, amplitude)
+train <- train[,!startsWith(names(train), "kurtosis")]
+train <- train[,!startsWith(names(train), "skewness")]
+train <- train[,!startsWith(names(train), "amplitude")]
+train <- train[,!startsWith(names(train), "max")]
+train <- train[,!startsWith(names(train), "min")]
+train <- train[,!startsWith(names(train), "var")]
+train <- train[,!startsWith(names(train), "avg")]
+train <- train[,!startsWith(names(train), "stddev")]
+test <- test[,!startsWith(names(test), "kurtosis")]
+test <- test[,!startsWith(names(test), "skewness")]
+test <- test[,!startsWith(names(test), "max")]
+test <- test[,!startsWith(names(test), "min")]
+test <- test[,!startsWith(names(test), "var")]
+test <- test[,!startsWith(names(test), "avg")]
+test <- test[,!startsWith(names(test), "stddev")]
+test <- test[,!startsWith(names(test), "amplitude")]
+```
+
+## Preprocessing the data
+
+Due to the high number of variables involved, we attempt to simplify the dimensions of the problem by using PCA. We will capture 80% of the variance with our principal components
+
+
+```{r}
+set.seed(123456)
+preprocessing <- preProcess(train[,-54], method = "pca", thresh = 0.8)
+trainPC <- predict(preprocessing, train[,-54])
+```
+
+This gives use 12 principal components instead of 54 variables retained initially in our model. 
+
+## Building the model
+
+We are going to use 10-fold cross validation to evaluate the accuracy of our model.
+
+We will use random forests. We will need to set the number of trees to a fixed number because the training of the model seems to be very time consuming.
+
+We plot the resulting accuracy of the model from 5 to 50 trees.
+
+``` {r}
+numTrees <- c(1:10)
+accuracy <- array()
+for (i in numTrees)
+{
+  rf <- train (x = trainPC, y = train$classe, method = "rf", trControl = fitControl, ntree= i*5)
+  accuracy[i] <- max(rf$results$Accuracy)
+}
+qplot(x=numTrees*5, y = accuracy, geom="line", main = "Accuracy of the random forest function of number of trees", ylab = "Accuracy", xlab="number of trees")
+
+```
+
+We see that accuracy increases sharply but reaches a slowly increasing plateau at around 25 trees for an accuracy of 0.96. 
+
+We therefore set the number of trees to 25 for our model.
+
+```{r}
+fitControl <- trainControl(method="cv", number = 10)
+rf<- train(x = trainPC, y = train$classe, trControl = fitControl, ntree = 25)
+```
+
+We can now predict the class for our test data. We first apply our PCA pre-processing to the test data before running the prediction.
+
+``` {r}
+testPC <- predict(preprocessing, test[,-54])
+predictions <- predict(rf, testPC)
+results <- data.frame(predictions)
+results
+```
+
+Inputing the predictions above in the course quizz gives a grade of 95% (one sample misclassified in the test data), confirming our out-of-sample accuracy prediction of 96%.  
+
